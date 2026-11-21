@@ -109,7 +109,7 @@ private fun HubScreen(
                 verticalArrangement = Arrangement.spacedBy(14.dp),
                 modifier = Modifier.width(460.dp),
             ) {
-                Text("Usar o celular", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+                Text("Celular como joystick", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
 
                 if (reason != null) {
                     Text(reason, color = Color(0xFFFFC078), fontSize = 16.sp)
@@ -117,8 +117,8 @@ private fun HubScreen(
 
                 Step("1", "Deixe o celular no mesmo Wi-Fi da TV.")
                 Step("2", "Aponte a câmera do celular para o QR code.")
-                Step("3", "Na aba \"Jogos\", envie os arquivos dos jogos para a TV. Eles aparecem aqui sozinhos.")
-                Step("4", "Na aba \"Controle\", use o celular para andar pelos menus. Ao abrir um jogo, ele vira o controle do jogo.")
+                Step("3", "O celular vira um joystick. Ele joga junto com o controle físico: cada celular é o próximo jogador livre.")
+                Step("4", "Nos menus da TV, o direcional do celular navega, A confirma e B volta. Para mandar jogos para a TV, toque em \"Enviar jogos\".")
 
                 url?.let {
                     Text(

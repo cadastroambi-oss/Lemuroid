@@ -18,6 +18,7 @@ import java.io.InputStream
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
 /**
@@ -56,7 +57,7 @@ object PhoneHub : PhoneControllerServer.Listener {
 
         val newServer =
             PhoneControllerServer(
-                pageProvider = { appContext.assets.open(PAGE_ASSET).use { it.readBytes() } },
+                pageProvider = { appContext.assets.open(JOYSTICK_ASSET).use { it.readBytes() } },
                 listener = this,
                 httpHandler = ::handleHttp,
             )
@@ -105,10 +106,12 @@ object PhoneHub : PhoneControllerServer.Listener {
             connectedPhones++
             state.value = state.value.copy(connectedPhones = connectedPhones)
         }
+        client.send("m")
         client.send("g $currentGamePort")
     }
 
     override fun onClientDisconnected(client: PhoneControllerServer.Client) {
+        stopRepeat(client)
         synchronized(this) {
             connectedPhones = (connectedPhones - 1).coerceAtLeast(0)
             state.value = state.value.copy(connectedPhones = connectedPhones)
@@ -121,13 +124,58 @@ object PhoneHub : PhoneControllerServer.Listener {
     ) {
         if (message == "h") return
         val parts = message.split(" ")
-        if (parts.getOrNull(0) == "n") {
-            val keyCode = NAVIGATION_KEYS[parts.getOrNull(1)] ?: return
-            keyExecutor.execute {
-                // Instrumentation can inject keys into windows that belong to this app.
-                runCatching { instrumentation.sendKeyDownUpSync(keyCode) }
-                    .onFailure { Timber.w(it, "Unable to inject key") }
+        when (parts.getOrNull(0)) {
+            // Joystick used in the TV menus: D-pad moves, A/Start confirm, B goes back.
+            "d" -> {
+                val x = parts.getOrNull(1)?.toFloatOrNull() ?: 0f
+                val y = parts.getOrNull(2)?.toFloatOrNull() ?: 0f
+                val keyCode =
+                    when {
+                        y < -0.5f -> KeyEvent.KEYCODE_DPAD_UP
+                        y > 0.5f -> KeyEvent.KEYCODE_DPAD_DOWN
+                        x < -0.5f -> KeyEvent.KEYCODE_DPAD_LEFT
+                        x > 0.5f -> KeyEvent.KEYCODE_DPAD_RIGHT
+                        else -> null
+                    }
+                startRepeat(client, keyCode)
             }
+            "k" -> {
+                if (parts.getOrNull(2) != "1") return
+                val keyCode =
+                    when (parts.getOrNull(1)?.toIntOrNull()) {
+                        KeyEvent.KEYCODE_BUTTON_A, KeyEvent.KEYCODE_BUTTON_START -> KeyEvent.KEYCODE_DPAD_CENTER
+                        KeyEvent.KEYCODE_BUTTON_B -> KeyEvent.KEYCODE_BACK
+                        else -> null
+                    } ?: return
+                injectKey(keyCode)
+            }
+        }
+    }
+
+    private val repeatJobs = mutableMapOf<Int, ScheduledFuture<*>>()
+
+    @Synchronized
+    private fun startRepeat(
+        client: PhoneControllerServer.Client,
+        keyCode: Int?,
+    ) {
+        repeatJobs.remove(client.id)?.cancel(false)
+        if (keyCode == null) return
+        injectKey(keyCode)
+        repeatJobs[client.id] =
+            poller.scheduleWithFixedDelay({ injectKey(keyCode) }, 450, 150, TimeUnit.MILLISECONDS)
+    }
+
+    @Synchronized
+    private fun stopRepeat(client: PhoneControllerServer.Client) {
+        repeatJobs.remove(client.id)?.cancel(false)
+    }
+
+    private fun injectKey(keyCode: Int) {
+        keyExecutor.execute {
+            // Instrumentation can inject keys into windows that belong to this app.
+            runCatching { instrumentation.sendKeyDownUpSync(keyCode) }
+                .onFailure { Timber.w(it, "Unable to inject key") }
         }
     }
 
@@ -143,6 +191,12 @@ object PhoneHub : PhoneControllerServer.Listener {
         contentLength: Long,
     ): HttpResponse? {
         return when {
+            method == "GET" && path == "/jogos" ->
+                HttpResponse(
+                    200,
+                    "text/html; charset=utf-8",
+                    appContext.assets.open(UPLOAD_ASSET).use { it.readBytes() },
+                )
             method == "GET" && path == "/files" -> listFiles()
             method == "POST" && path == "/upload" -> upload(query["name"], body, contentLength)
             method == "POST" && path == "/delete" -> delete(query["name"])
@@ -214,15 +268,6 @@ object PhoneHub : PhoneControllerServer.Listener {
         return HttpResponse.json("{\"ok\":true}")
     }
 
-    private const val PAGE_ASSET = "phone_hub.html"
-
-    private val NAVIGATION_KEYS =
-        mapOf(
-            "up" to KeyEvent.KEYCODE_DPAD_UP,
-            "down" to KeyEvent.KEYCODE_DPAD_DOWN,
-            "left" to KeyEvent.KEYCODE_DPAD_LEFT,
-            "right" to KeyEvent.KEYCODE_DPAD_RIGHT,
-            "ok" to KeyEvent.KEYCODE_DPAD_CENTER,
-            "back" to KeyEvent.KEYCODE_BACK,
-        )
+    private const val JOYSTICK_ASSET = "phone_controller.html"
+    private const val UPLOAD_ASSET = "phone_hub.html"
 }

@@ -18,7 +18,7 @@
 
   #top { grid-column: 2; grid-row: 1; display: flex; gap: 8px; align-items: center; justify-content: center; padding: 0 10px; }
   .small { padding: 0 12px; height: 34px; border-radius: 17px; background: #2c2b36; color: #b9b6c8; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; white-space: nowrap; }
-  .shortcut.hidden { display: none; }
+  .shortcut.hidden, #upload.hidden { display: none; }
 
   #left { grid-column: 1; grid-row: 2; display: flex; align-items: center; justify-content: center; }
   #center { grid-column: 2; grid-row: 2; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 0 8px; }
@@ -62,6 +62,7 @@
     <div class="small shortcut" data-action="load">Carregar</div>
     <div class="small shortcut" data-action="ff">Turbo</div>
     <div class="small shortcut" data-action="menu">Menu</div>
+    <a class="small hidden" id="upload" href="/jogos" style="text-decoration:none">📁 Enviar jogos</a>
   </div>
   <div id="R" class="shoulder btn" data-key="103">R</div>
 
@@ -101,6 +102,7 @@
   var hubMatch = /[?&]hub=(\d+)/.exec(location.search);
   var hubPort = hubMatch ? hubMatch[1] : null;
   var failures = 0;
+  var menuMode = false;
   var overlay = document.getElementById('overlay');
   var overlayText = document.getElementById('overlayText');
   var playerText = document.getElementById('playerText');
@@ -119,6 +121,23 @@
     ws.onopen = function () { connected = true; failures = 0; overlay.classList.add('hidden'); };
     ws.onmessage = function (ev) {
       var p = String(ev.data).split(' ');
+      if (p[0] === 'm') {
+        // Connected to the TV menus (no game open yet): the joystick moves through the menus.
+        menuMode = true;
+        playerText.textContent = 'Menus da TV';
+        dot.style.background = '#8f8ca3';
+        document.querySelectorAll('.shortcut').forEach(function (el) { el.classList.add('hidden'); });
+        document.getElementById('upload').classList.remove('hidden');
+        return;
+      }
+      if (p[0] === 'g') {
+        var gp = parseInt(p[1], 10) || 0;
+        if (menuMode && gp > 0) {
+          playerText.textContent = 'Abrindo o jogo…';
+          location.href = 'http://' + location.hostname + ':' + gp + '/?hub=' + location.port;
+        }
+        return;
+      }
       if (p[0] === 'p') {
         var n = parseInt(p[1], 10);
         if (n > 0) {
@@ -138,7 +157,7 @@
       failures++;
       if (hubPort && failures >= 2) {
         // The game was closed: go back to the TV menu controller.
-        location.href = 'http://' + location.hostname + ':' + hubPort + '/#controle';
+        location.href = 'http://' + location.hostname + ':' + hubPort + '/';
         return;
       }
       overlayText.textContent = 'Sem conexão com a TV. Tentando de novo… (o jogo precisa estar aberto e os dois no mesmo Wi-Fi)';
@@ -214,6 +233,7 @@
   }
 
   function onDown(e) {
+    if (e.target.closest && e.target.closest('#upload')) return;
     e.preventDefault();
     var shortcut = e.target.closest ? e.target.closest('.shortcut') : null;
     if (shortcut) { send('a ' + shortcut.getAttribute('data-action')); shortcut.classList.add('pressed'); vibrate(); setTimeout(function () { shortcut.classList.remove('pressed'); }, 150); return; }

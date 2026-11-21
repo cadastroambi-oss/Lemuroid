@@ -53,7 +53,7 @@
   <h1>Lemuroid+ no celular</h1>
   <div id="status">Conectando à TV…</div>
   <div class="tabs">
-    <button class="tab" data-tab="controle">🎮 Controle</button>
+    <button class="tab" data-tab="controle">🎮 Voltar ao joystick</button>
     <button class="tab" data-tab="jogos">📁 Jogos</button>
   </div>
 </header>
@@ -95,8 +95,13 @@
     if (name === 'jogos') loadFiles();
     try { history.replaceState(null, '', '#' + name); } catch (e) {}
   }
-  document.querySelectorAll('.tab').forEach(function (t) { t.addEventListener('click', function () { showTab(t.getAttribute('data-tab')); }); });
-  showTab(location.hash === '#jogos' ? 'jogos' : 'controle');
+  document.querySelectorAll('.tab').forEach(function (t) {
+    t.addEventListener('click', function () {
+      if (t.getAttribute('data-tab') === 'controle') { location.href = '/'; return; }
+      showTab(t.getAttribute('data-tab'));
+    });
+  });
+  showTab('jogos');
 
   // ---------- connection ----------
   var statusEl = document.getElementById('status');
