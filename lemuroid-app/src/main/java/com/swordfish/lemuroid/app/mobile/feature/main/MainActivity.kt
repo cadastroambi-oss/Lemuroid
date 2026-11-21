@@ -1,5 +1,7 @@
 package com.swordfish.lemuroid.app.mobile.feature.main
 
+import com.swordfish.lemuroid.app.tv.main.MainTVActivity
+import com.swordfish.lemuroid.app.tv.shared.TVHelper
 import android.app.Activity
 import android.content.Intent
 import android.graphics.Color
@@ -115,6 +117,14 @@ class MainActivity : RetrogradeComponentActivity(), BusyActivity {
             SystemBarStyle.dark(Color.TRANSPARENT),
         )
         super.onCreate(savedInstanceState)
+
+        // On a TV box (Mi Box) always use the TV interface, even when the app is opened
+        // from a launcher or file manager that starts the phone interface.
+        if (TVHelper.isTV(this)) {
+            startActivity(Intent(this, MainTVActivity::class.java))
+            finish()
+            return
+        }
 
         GlobalScope.safeLaunch {
             reviewManager.initialize(applicationContext)
