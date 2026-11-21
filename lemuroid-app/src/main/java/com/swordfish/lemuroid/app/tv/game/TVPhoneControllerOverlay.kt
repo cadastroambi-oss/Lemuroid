@@ -1,6 +1,5 @@
 package com.swordfish.lemuroid.app.tv.game
 
-import android.graphics.Bitmap
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -21,16 +20,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.google.zxing.BarcodeFormat
-import com.google.zxing.EncodeHintType
-import com.google.zxing.qrcode.QRCodeWriter
 import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelPhoneController
+import com.swordfish.lemuroid.app.shared.phonecontroller.PhoneControllerFiles
 
 @Composable
 fun TVPhoneControllerOverlay(state: GameViewModelPhoneController.UiState) {
@@ -66,7 +61,7 @@ fun TVPhoneControllerOverlay(state: GameViewModelPhoneController.UiState) {
 @Composable
 private fun QrCard(state: GameViewModelPhoneController.UiState) {
     val url = state.url ?: return
-    val qr = remember(url) { createQrBitmap(url) }
+    val qr = remember(url) { PhoneControllerFiles.createQrBitmap(url) }
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -102,7 +97,7 @@ private fun QrCard(state: GameViewModelPhoneController.UiState) {
             textAlign = TextAlign.Center,
         )
         Text(
-            text = url.removePrefix("http://").removeSuffix("/"),
+            text = url.removePrefix("http://").substringBefore("/"),
             color = Color(0xFF8F8CA3),
             fontSize = 11.sp,
         )
@@ -114,24 +109,4 @@ private fun QrCard(state: GameViewModelPhoneController.UiState) {
             )
         }
     }
-}
-
-private fun createQrBitmap(text: String): ImageBitmap? {
-    return runCatching {
-        val matrix =
-            QRCodeWriter().encode(
-                text,
-                BarcodeFormat.QR_CODE,
-                0,
-                0,
-                mapOf(EncodeHintType.MARGIN to 0),
-            )
-        val pixels = IntArray(matrix.width * matrix.height)
-        for (y in 0 until matrix.height) {
-            for (x in 0 until matrix.width) {
-                pixels[y * matrix.width + x] = if (matrix[x, y]) 0xFF000000.toInt() else 0xFFFFFFFF.toInt()
-            }
-        }
-        Bitmap.createBitmap(pixels, matrix.width, matrix.height, Bitmap.Config.ARGB_8888).asImageBitmap()
-    }.getOrNull()
 }

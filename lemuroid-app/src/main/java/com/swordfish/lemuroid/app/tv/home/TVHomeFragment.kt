@@ -25,6 +25,7 @@ import com.swordfish.lemuroid.app.shared.savesync.SaveSyncWork
 import com.swordfish.lemuroid.app.shared.settings.StorageFrameworkPickerLauncher
 import com.swordfish.lemuroid.app.shared.systems.MetaSystemInfo
 import com.swordfish.lemuroid.app.tv.folderpicker.TVFolderPickerLauncher
+import com.swordfish.lemuroid.app.tv.phone.TVPhoneHubActivity
 import com.swordfish.lemuroid.app.tv.settings.TVSettingsActivity
 import com.swordfish.lemuroid.app.tv.shared.GamePresenter
 import com.swordfish.lemuroid.app.tv.shared.TVHelper
@@ -77,6 +78,7 @@ class TVHomeFragment : BrowseSupportFragment() {
                                     requireContext().applicationContext,
                                 )
                             TVSettingType.CHOOSE_DIRECTORY -> launchFolderPicker()
+                            TVSettingType.PHONE_HUB -> TVPhoneHubActivity.launch(requireContext())
                             TVSettingType.SETTINGS -> launchTVSettings()
                             TVSettingType.SHOW_ALL_FAVORITES -> launchFavorites()
                             TVSettingType.SAVE_SYNC ->
@@ -227,6 +229,7 @@ class TVHomeFragment : BrowseSupportFragment() {
                 add(TVSetting(TVSettingType.RESCAN, !indexInProgress))
             }
 
+            add(TVSetting(TVSettingType.PHONE_HUB, true))
             add(TVSetting(TVSettingType.CHOOSE_DIRECTORY, !indexInProgress))
             add(TVSetting(TVSettingType.SETTINGS, !indexInProgress))
         }

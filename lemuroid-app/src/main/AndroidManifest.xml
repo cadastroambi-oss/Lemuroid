@@ -124,6 +124,10 @@
         <activity android:name=".app.tv.folderpicker.TVFolderPickerLauncher" />
 
         <activity
+            android:name=".app.tv.phone.TVPhoneHubActivity"
+            android:theme="@style/LemuroidLeanbackTheme" />
+
+        <activity
             android:name=".app.tv.input.TVGamePadBindingActivity"
             android:theme="@style/Theme.Leanback.GuidedStep" />
 

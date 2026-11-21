@@ -3,6 +3,7 @@ package com.swordfish.lemuroid.app.shared.game.viewmodel
 import android.content.Context
 import android.view.KeyEvent
 import com.swordfish.lemuroid.app.shared.input.InputDeviceManager
+import com.swordfish.lemuroid.app.shared.phonecontroller.PhoneControllerFiles
 import com.swordfish.lemuroid.app.shared.phonecontroller.PhoneControllerServer
 import com.swordfish.libretrodroid.GLRetroView.Companion.MOTION_SOURCE_DPAD
 import kotlinx.coroutines.CoroutineScope
@@ -68,6 +69,7 @@ class GameViewModelPhoneController(
             return
         }
 
+        PhoneControllerFiles.writeGamePort(appContext, server.port)
         state.value = state.value.copy(enabled = true, url = computeUrl())
         showQrCode(INITIAL_QR_DURATION_MS)
 
@@ -83,6 +85,7 @@ class GameViewModelPhoneController(
     }
 
     fun stop() {
+        PhoneControllerFiles.clearGamePort(appContext)
         server.stop()
         started = false
     }
@@ -115,7 +118,8 @@ class GameViewModelPhoneController(
 
     private fun computeUrl(): String? {
         val address = PhoneControllerServer.findLocalAddress() ?: return null
-        return "http://$address:${server.port}/"
+        val hub = PhoneControllerFiles.readHubPort(appContext)?.let { "?hub=$it" } ?: ""
+        return "http://$address:${server.port}/$hub"
     }
 
     private fun loadPage(): ByteArray {

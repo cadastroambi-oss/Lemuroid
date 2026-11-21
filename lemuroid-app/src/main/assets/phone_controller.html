@@ -98,6 +98,9 @@
   var COLORS = ['#e03131', '#3b5bdb', '#2f9e44', '#f08c00'];
   var ws = null;
   var connected = false;
+  var hubMatch = /[?&]hub=(\d+)/.exec(location.search);
+  var hubPort = hubMatch ? hubMatch[1] : null;
+  var failures = 0;
   var overlay = document.getElementById('overlay');
   var overlayText = document.getElementById('overlayText');
   var playerText = document.getElementById('playerText');
@@ -113,7 +116,7 @@
 
   function connect() {
     try { ws = new WebSocket('ws://' + location.host + '/ws'); } catch (e) { retry(); return; }
-    ws.onopen = function () { connected = true; overlay.classList.add('hidden'); };
+    ws.onopen = function () { connected = true; failures = 0; overlay.classList.add('hidden'); };
     ws.onmessage = function (ev) {
       var p = String(ev.data).split(' ');
       if (p[0] === 'p') {
@@ -132,6 +135,12 @@
     ws.onclose = function () {
       connected = false;
       releaseEverything();
+      failures++;
+      if (hubPort && failures >= 2) {
+        // The game was closed: go back to the TV menu controller.
+        location.href = 'http://' + location.hostname + ':' + hubPort + '/#controle';
+        return;
+      }
       overlayText.textContent = 'Sem conexão com a TV. Tentando de novo… (o jogo precisa estar aberto e os dois no mesmo Wi-Fi)';
       overlay.classList.remove('hidden');
       retry();

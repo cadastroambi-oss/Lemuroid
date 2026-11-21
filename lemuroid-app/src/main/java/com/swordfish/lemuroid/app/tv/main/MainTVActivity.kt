@@ -1,5 +1,6 @@
 package com.swordfish.lemuroid.app.tv.main
 
+import com.swordfish.lemuroid.app.tv.phone.PhoneHub
 import android.Manifest
 import android.app.Activity
 import android.content.Intent
@@ -63,6 +64,7 @@ class MainTVActivity : BaseTVActivity(), BusyActivity {
         }
 
         ensureLegacyStoragePermissionsIfNeeded()
+        PhoneHub.ensureStarted(this)
     }
 
     override fun onActivityResult(

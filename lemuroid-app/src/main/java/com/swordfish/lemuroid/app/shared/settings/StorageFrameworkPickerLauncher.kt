@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import com.swordfish.lemuroid.app.tv.phone.TVPhoneHubActivity
+import com.swordfish.lemuroid.app.tv.shared.TVHelper
 import com.swordfish.lemuroid.R
 import com.swordfish.lemuroid.app.shared.library.LibraryIndexScheduler
 import com.swordfish.lemuroid.app.utils.android.displayErrorDialog
@@ -29,11 +31,28 @@ class StorageFrameworkPickerLauncher : RetrogradeActivity() {
                     this.putExtra(Intent.EXTRA_LOCAL_ONLY, true)
                 }
             try {
+                pickerStartTime = System.currentTimeMillis()
                 startActivityForResult(intent, REQUEST_CODE_PICK_FOLDER)
             } catch (e: Exception) {
-                showStorageAccessFrameworkNotSupportedDialog()
+                if (TVHelper.isTV(this)) {
+                    openPhoneHub()
+                } else {
+                    showStorageAccessFrameworkNotSupportedDialog()
+                }
             }
         }
+    }
+
+    private var pickerStartTime = 0L
+
+    // Many Android TV boxes (Mi Box included) ship without a working folder picker: it closes
+    // immediately. In that case we offer sending the games from the phone instead.
+    private fun openPhoneHub() {
+        TVPhoneHubActivity.launch(
+            this,
+            "O seletor de pastas não funciona nesta TV. Envie os jogos pelo celular:",
+        )
+        finish()
     }
 
     private fun showStorageAccessFrameworkNotSupportedDialog() {
@@ -48,6 +67,14 @@ class StorageFrameworkPickerLauncher : RetrogradeActivity() {
         resultData: Intent?,
     ) {
         super.onActivityResult(requestCode, resultCode, resultData)
+
+        val closedImmediately = System.currentTimeMillis() - pickerStartTime < PICKER_MIN_TIME_MS
+        if (requestCode == REQUEST_CODE_PICK_FOLDER && resultCode != Activity.RESULT_OK &&
+            closedImmediately && TVHelper.isTV(this)
+        ) {
+            openPhoneHub()
+            return
+        }
 
         if (requestCode == REQUEST_CODE_PICK_FOLDER && resultCode == Activity.RESULT_OK) {
             val sharedPreferences = SharedPreferencesHelper.getLegacySharedPreferences(this)
@@ -90,6 +117,7 @@ class StorageFrameworkPickerLauncher : RetrogradeActivity() {
 
     companion object {
         private const val REQUEST_CODE_PICK_FOLDER = 1
+        private const val PICKER_MIN_TIME_MS = 1500L
 
         fun pickFolder(context: Context) {
             context.startActivity(Intent(context, StorageFrameworkPickerLauncher::class.java))

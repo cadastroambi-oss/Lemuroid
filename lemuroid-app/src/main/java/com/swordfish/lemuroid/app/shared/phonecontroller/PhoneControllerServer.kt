@@ -13,6 +13,7 @@ import java.net.NetworkInterface
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketTimeoutException
+import java.net.URLDecoder
 import java.security.MessageDigest
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -25,7 +26,30 @@ import java.util.concurrent.atomic.AtomicInteger
 class PhoneControllerServer(
     private val pageProvider: () -> ByteArray,
     private val listener: Listener,
+    private val httpHandler: HttpHandler? = null,
 ) {
+    class HttpResponse(val status: Int, val contentType: String, val body: ByteArray) {
+        companion object {
+            fun json(text: String) = HttpResponse(200, "application/json; charset=utf-8", text.toByteArray())
+
+            fun error(
+                status: Int,
+                message: String,
+            ) = HttpResponse(status, "text/plain; charset=utf-8", message.toByteArray())
+        }
+    }
+
+    /** Extra HTTP routes. Returns null when the route is not handled. */
+    fun interface HttpHandler {
+        fun handle(
+            method: String,
+            path: String,
+            query: Map<String, String>,
+            body: InputStream,
+            contentLength: Long,
+        ): HttpResponse?
+    }
+
     interface Listener {
         fun onClientConnected(client: Client)
 
@@ -95,6 +119,11 @@ class PhoneControllerServer(
     var port: Int = -1
         private set
 
+    fun broadcast(text: String) {
+        val snapshot = synchronized(clients) { clients.toList() }
+        snapshot.forEach { it.send(text) }
+    }
+
     @Synchronized
     fun start(): Boolean {
         if (serverSocket != null) return true
@@ -158,13 +187,31 @@ class PhoneControllerServer(
                 }
             }
 
-            val path = requestLine.split(" ").getOrNull(1) ?: "/"
+            val requestParts = requestLine.split(" ")
+            val method = requestParts.getOrNull(0)?.uppercase() ?: "GET"
+            val target = requestParts.getOrNull(1) ?: "/"
+            val path = target.substringBefore('?')
+            val query = parseQuery(target.substringAfter('?', ""))
             val isWebSocket = headers["upgrade"]?.equals("websocket", ignoreCase = true) == true
 
-            when {
-                isWebSocket -> handleWebSocket(socket, input, headers)
-                path == "/" || path.startsWith("/?") || path.startsWith("/index") -> servePage(socket)
-                else -> serveNotFound(socket)
+            if (isWebSocket) {
+                handleWebSocket(socket, input, headers)
+                return
+            }
+
+            if (method == "GET" && (path == "/" || path == "/index.html")) {
+                servePage(socket)
+                return
+            }
+
+            val contentLength = headers["content-length"]?.toLongOrNull() ?: 0L
+            socket.soTimeout = UPLOAD_TIMEOUT_MS
+            val response =
+                httpHandler?.handle(method, path, query, LimitedInputStream(input, contentLength), contentLength)
+            if (response != null) {
+                sendResponse(socket, response)
+            } else {
+                serveNotFound(socket)
             }
         } catch (e: Exception) {
             Timber.d(e, "Phone controller connection error")
@@ -185,6 +232,54 @@ class PhoneControllerServer(
         output.write(header.toByteArray(Charsets.ISO_8859_1))
         output.write(body)
         output.flush()
+    }
+
+    private fun sendResponse(
+        socket: Socket,
+        response: HttpResponse,
+    ) {
+        val reason = if (response.status in 200..299) "OK" else "Error"
+        val header =
+            "HTTP/1.1 ${response.status} $reason\r\n" +
+                "Content-Type: ${response.contentType}\r\n" +
+                "Content-Length: ${response.body.size}\r\n" +
+                "Cache-Control: no-cache\r\n" +
+                "Connection: close\r\n\r\n"
+        val output = socket.getOutputStream()
+        output.write(header.toByteArray(Charsets.ISO_8859_1))
+        output.write(response.body)
+        output.flush()
+    }
+
+    private fun parseQuery(query: String): Map<String, String> {
+        if (query.isEmpty()) return emptyMap()
+        return query.split("&").mapNotNull { pair ->
+            val key = pair.substringBefore('=')
+            val value = pair.substringAfter('=', "")
+            runCatching {
+                URLDecoder.decode(key, "UTF-8") to URLDecoder.decode(value, "UTF-8")
+            }.getOrNull()
+        }.toMap()
+    }
+
+    private class LimitedInputStream(private val source: InputStream, private var remaining: Long) : InputStream() {
+        override fun read(): Int {
+            if (remaining <= 0) return -1
+            val value = source.read()
+            if (value >= 0) remaining--
+            return value
+        }
+
+        override fun read(
+            buffer: ByteArray,
+            offset: Int,
+            length: Int,
+        ): Int {
+            if (remaining <= 0) return -1
+            val read = source.read(buffer, offset, minOf(length.toLong(), remaining).toInt())
+            if (read > 0) remaining -= read
+            return read
+        }
     }
 
     private fun serveNotFound(socket: Socket) {
@@ -305,6 +400,7 @@ class PhoneControllerServer(
         private const val MAX_LINE_SIZE = 8 * 1024
         private const val HTTP_TIMEOUT_MS = 10_000
         private const val WS_TIMEOUT_MS = 5_000
+        private const val UPLOAD_TIMEOUT_MS = 30_000
         private val PORTS = (8765..8775).toList() + 0
 
         /** Returns the best local IPv4 address of this device (Wi-Fi or Ethernet), if any. */
