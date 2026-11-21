@@ -14,6 +14,12 @@
         app:icon="@drawable/ic_menu_load"/>
 
     <Preference
+        android:key="pref_game_phone_controller"
+        android:title="Controle pelo celular (QR code)"
+        android:summary="Mostra o QR code na tela para conectar celulares"
+        app:icon="@drawable/ic_menu_settings"/>
+
+    <Preference
         android:key="pref_game_quit"
         android:title="@string/game_menu_quit"
         app:icon="@drawable/ic_menu_quit"/>

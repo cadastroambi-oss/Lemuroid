@@ -84,10 +84,19 @@ android {
         }
 
         maybeCreate("release").apply {
-            storeFile = file("$rootDir/release.jks")
-            keyAlias = "lemuroid"
-            storePassword = "lemuroid"
-            keyPassword = "lemuroid"
+            val releaseStore = file("$rootDir/release.jks")
+            if (releaseStore.exists()) {
+                storeFile = releaseStore
+                keyAlias = "lemuroid"
+                storePassword = "lemuroid"
+                keyPassword = "lemuroid"
+            } else {
+                // Personal build: sign with the repository debug key so updates install over each other.
+                storeFile = file("$rootDir/debug.keystore")
+                keyAlias = "androiddebugkey"
+                storePassword = "android"
+                keyPassword = "android"
+            }
         }
     }
 
@@ -96,7 +105,9 @@ android {
             isMinifyEnabled = true
             signingConfig = signingConfigs["release"]
             proguardFiles(getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro")
-            resValue("string", "lemuroid_name", "Lemuroid")
+            // Different id so it can be installed next to the official Lemuroid.
+            applicationIdSuffix = ".celular"
+            resValue("string", "lemuroid_name", "Lemuroid+")
         }
         getByName("debug") {
             applicationIdSuffix = ".debug"
@@ -180,6 +191,7 @@ dependencies {
     implementation(deps.libs.androidx.leanback.tvProvider)
     implementation(deps.libs.harmony)
     implementation(deps.libs.startup)
+    implementation(deps.libs.zxingCore)
     implementation(deps.libs.kotlin.serialization)
     implementation(deps.libs.kotlin.serializationJson)
 

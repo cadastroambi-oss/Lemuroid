@@ -161,6 +161,14 @@ object GameMenuHelper {
                 setResultAndFinish(activity, resultIntent)
                 true
             }
+            "pref_game_phone_controller" -> {
+                val resultIntent =
+                    Intent().apply {
+                        putExtra(GameMenuContract.RESULT_SHOW_PHONE_QR, true)
+                    }
+                setResultAndFinish(activity, resultIntent)
+                true
+            }
             "pref_game_reset" -> {
                 val resultIntent =
                     Intent().apply {

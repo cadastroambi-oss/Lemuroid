@@ -17,6 +17,7 @@ class TVGameActivity : BaseGameActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        getGameViewModel().startPhoneController()
         initializeFlows()
     }
 

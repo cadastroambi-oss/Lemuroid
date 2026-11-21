@@ -11,30 +11,40 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.swordfish.lemuroid.app.shared.game.BaseGameScreenViewModel
+import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelPhoneController
 
 @Composable
 fun TVGameScreen(viewModel: BaseGameScreenViewModel) {
     val localContext = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current
 
-    AndroidView(
-        modifier = Modifier.fillMaxSize(),
-        factory = {
-            viewModel.createRetroView(localContext, lifecycle)
-        },
-    )
-
-    val isLoading =
-        viewModel.loadingState
-            .collectAsState(true)
-            .value
-
-    if (isLoading) {
-        Box(
+    Box(modifier = Modifier.fillMaxSize()) {
+        AndroidView(
             modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center,
-        ) {
-            CircularProgressIndicator()
+            factory = {
+                viewModel.createRetroView(localContext, lifecycle)
+            },
+        )
+
+        val isLoading =
+            viewModel.loadingState
+                .collectAsState(true)
+                .value
+
+        val phoneControllerState =
+            viewModel.getPhoneControllerState()
+                .collectAsState(GameViewModelPhoneController.UiState())
+                .value
+
+        TVPhoneControllerOverlay(phoneControllerState)
+
+        if (isLoading) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator()
+            }
         }
     }
 }

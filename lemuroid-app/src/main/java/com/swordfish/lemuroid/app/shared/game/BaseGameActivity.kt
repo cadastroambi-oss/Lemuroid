@@ -152,6 +152,8 @@ abstract class BaseGameActivity : ImmersiveActivity() {
     @Composable
     abstract fun GameScreen(viewModel: BaseGameScreenViewModel)
 
+    protected fun getGameViewModel(): BaseGameScreenViewModel = baseGameScreenViewModel
+
     private fun initialiseFlows() {
         launchOnState(Lifecycle.State.CREATED) {
             initializeViewModelsEffectsFlow()
@@ -379,6 +381,9 @@ abstract class BaseGameActivity : ImmersiveActivity() {
                 GlobalScope.launch {
                     baseGameScreenViewModel.loadSlot(data.getIntExtra(GameMenuContract.RESULT_LOAD, 0))
                 }
+            }
+            if (data?.getBooleanExtra(GameMenuContract.RESULT_SHOW_PHONE_QR, false) == true) {
+                baseGameScreenViewModel.showPhoneControllerQrCode()
             }
             if (data?.getBooleanExtra(GameMenuContract.RESULT_QUIT, false) == true) {
                 baseGameScreenViewModel.requestFinish()

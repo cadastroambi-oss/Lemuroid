@@ -14,6 +14,7 @@ import androidx.lifecycle.viewModelScope
 import com.swordfish.lemuroid.app.mobile.feature.game.GameService
 import com.swordfish.lemuroid.app.mobile.feature.settings.SettingsManager
 import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelInput
+import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelPhoneController
 import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelRetroGameView
 import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelSaves
 import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelSideEffects
@@ -125,6 +126,16 @@ class BaseGameScreenViewModel(
             retroGameView,
             inputs,
             tilt,
+            sideEffects,
+            viewModelScope,
+        )
+    private val phoneController =
+        GameViewModelPhoneController(
+            appContext,
+            inputDeviceManager,
+            retroGameView,
+            tilt,
+            inputs,
             sideEffects,
             viewModelScope,
         )
@@ -301,6 +312,27 @@ class BaseGameScreenViewModel(
             val snapshot = saves.captureSaveSnapshot(false)
             saves.writeSaveSnapshot(snapshot)
         }
+    }
+
+    fun startPhoneController() {
+        phoneController.start()
+    }
+
+    fun showPhoneControllerQrCode() {
+        phoneController.showQrCode()
+    }
+
+    fun hidePhoneControllerQrCode() {
+        phoneController.hideQrCode()
+    }
+
+    fun getPhoneControllerState(): Flow<GameViewModelPhoneController.UiState> {
+        return phoneController.getUiState()
+    }
+
+    override fun onCleared() {
+        phoneController.stop()
+        super.onCleared()
     }
 
     fun handleVirtualInputEvent(events: List<InputEvent>) {
