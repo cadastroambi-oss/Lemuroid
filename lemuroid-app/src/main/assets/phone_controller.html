@@ -175,6 +175,31 @@
 
   setInterval(function () { send('h'); }, 1000);
 
+  // While waiting in the TV menus, also look for the game directly: the game opens its own
+  // server on one of the next ports. As soon as one answers, jump to it.
+  var probing = false;
+  setInterval(function () {
+    if (!menuMode || probing) return;
+    probing = true;
+    var me = parseInt(location.port, 10);
+    var ports = [];
+    for (var p = 8765; p <= 8775; p++) if (p !== me) ports.push(p);
+    var pending = ports.length, found = false;
+    ports.forEach(function (port) {
+      var ctrl = window.AbortController ? new AbortController() : null;
+      var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, 1200);
+      fetch('http://' + location.hostname + ':' + port + '/game', { mode: 'no-cors', cache: 'no-store', signal: ctrl ? ctrl.signal : undefined })
+        .then(function () {
+          if (found) return;
+          found = true;
+          playerText.textContent = 'Abrindo o jogo…';
+          location.href = 'http://' + location.hostname + ':' + port + '/?hub=' + location.port;
+        })
+        .catch(function () {})
+        .then(function () { clearTimeout(timer); if (--pending === 0) probing = false; });
+    });
+  }, 2000);
+
   // ----- buttons (multi-touch, with sliding between buttons) -----
   var pointers = {};           // pointerId -> {key: element|null, dpad: bool}
   var keyCount = {};           // keyCode -> number of fingers holding it
