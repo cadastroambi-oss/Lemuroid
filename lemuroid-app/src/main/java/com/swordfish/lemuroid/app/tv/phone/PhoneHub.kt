@@ -122,34 +122,7 @@ object PhoneHub : PhoneControllerServer.Listener {
         client: PhoneControllerServer.Client,
         message: String,
     ) {
-        if (message == "h") return
-        val parts = message.split(" ")
-        when (parts.getOrNull(0)) {
-            // Joystick used in the TV menus: D-pad moves, A/Start confirm, B goes back.
-            "d" -> {
-                val x = parts.getOrNull(1)?.toFloatOrNull() ?: 0f
-                val y = parts.getOrNull(2)?.toFloatOrNull() ?: 0f
-                val keyCode =
-                    when {
-                        y < -0.5f -> KeyEvent.KEYCODE_DPAD_UP
-                        y > 0.5f -> KeyEvent.KEYCODE_DPAD_DOWN
-                        x < -0.5f -> KeyEvent.KEYCODE_DPAD_LEFT
-                        x > 0.5f -> KeyEvent.KEYCODE_DPAD_RIGHT
-                        else -> null
-                    }
-                startRepeat(client, keyCode)
-            }
-            "k" -> {
-                if (parts.getOrNull(2) != "1") return
-                val keyCode =
-                    when (parts.getOrNull(1)?.toIntOrNull()) {
-                        KeyEvent.KEYCODE_BUTTON_A, KeyEvent.KEYCODE_BUTTON_START -> KeyEvent.KEYCODE_DPAD_CENTER
-                        KeyEvent.KEYCODE_BUTTON_B -> KeyEvent.KEYCODE_BACK
-                        else -> null
-                    } ?: return
-                injectKey(keyCode)
-            }
-        }
+        // The phone is only a game controller: in the TV menus it just waits for a game to start.
     }
 
     private val repeatJobs = mutableMapOf<Int, ScheduledFuture<*>>()

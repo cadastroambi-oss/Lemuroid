@@ -118,7 +118,7 @@ private fun HubScreen(
                 Step("1", "Deixe o celular no mesmo Wi-Fi da TV.")
                 Step("2", "Aponte a câmera do celular para o QR code.")
                 Step("3", "O celular vira um joystick. Ele joga junto com o controle físico: cada celular é o próximo jogador livre.")
-                Step("4", "Nos menus da TV, o direcional do celular navega, A confirma e B volta. Para mandar jogos para a TV, toque em \"Enviar jogos\".")
+                Step("4", "Abra um jogo com o controle remoto ou com o controle físico. O celular entra no jogo sozinho.")
 
                 url?.let {
                     Text(

@@ -124,7 +124,7 @@
       if (p[0] === 'm') {
         // Connected to the TV menus (no game open yet): the joystick moves through the menus.
         menuMode = true;
-        playerText.textContent = 'Menus da TV';
+        playerText.textContent = 'Conectado – abra um jogo na TV';
         dot.style.background = '#8f8ca3';
         document.querySelectorAll('.shortcut').forEach(function (el) { el.classList.add('hidden'); });
         document.getElementById('upload').classList.remove('hidden');
