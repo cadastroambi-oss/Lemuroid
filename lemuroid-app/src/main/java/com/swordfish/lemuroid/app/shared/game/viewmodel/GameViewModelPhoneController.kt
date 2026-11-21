@@ -1,6 +1,7 @@
 package com.swordfish.lemuroid.app.shared.game.viewmodel
 
 import android.content.Context
+import android.os.SystemClock
 import android.view.InputDevice
 import android.view.KeyEvent
 import com.swordfish.lemuroid.app.shared.input.InputDeviceManager
@@ -42,8 +43,10 @@ class GameViewModelPhoneController(
     private class PhoneState(val client: PhoneControllerServer.Client) {
         var port: Int? = null
         val pressedKeys = mutableSetOf<Int>()
+        val pressTimes = mutableMapOf<Int, Long>()
         var dpadX = 0f
         var dpadY = 0f
+        var dpadTime = 0L
     }
 
     private val server =
@@ -179,13 +182,41 @@ class GameViewModelPhoneController(
                 val keyCode = parts.getOrNull(1)?.toIntOrNull() ?: return
                 if (keyCode !in ALLOWED_KEYS) return
                 val pressed = parts.getOrNull(2) == "1"
-                if (pressed) phone.pressedKeys.add(keyCode) else phone.pressedKeys.remove(keyCode)
-                phone.port?.let { sendKey(it, keyCode, pressed) }
+                if (pressed) {
+                    phone.pressedKeys.add(keyCode)
+                    phone.pressTimes[keyCode] = SystemClock.uptimeMillis()
+                    phone.port?.let { sendKey(it, keyCode, true) }
+                } else {
+                    phone.pressedKeys.remove(keyCode)
+                    // A quick tap may press and release between two frames: the game would never
+                    // see it. Keep every press for a minimum time.
+                    val elapsed = SystemClock.uptimeMillis() - (phone.pressTimes[keyCode] ?: 0L)
+                    if (elapsed >= MIN_PRESS_MS) {
+                        phone.port?.let { sendKey(it, keyCode, false) }
+                    } else {
+                        scope.launch {
+                            delay(MIN_PRESS_MS - elapsed)
+                            if (keyCode !in phone.pressedKeys) phone.port?.let { sendKey(it, keyCode, false) }
+                        }
+                    }
+                }
             }
             "d" -> {
                 phone.dpadX = parts.getOrNull(1)?.toFloatOrNull()?.coerceIn(-1f, 1f) ?: 0f
                 phone.dpadY = parts.getOrNull(2)?.toFloatOrNull()?.coerceIn(-1f, 1f) ?: 0f
-                phone.port?.let { sendDpad(it, phone.dpadX, phone.dpadY) }
+                val centered = phone.dpadX == 0f && phone.dpadY == 0f
+                val elapsed = SystemClock.uptimeMillis() - phone.dpadTime
+                if (!centered) {
+                    phone.dpadTime = SystemClock.uptimeMillis()
+                    phone.port?.let { sendDpad(it, phone.dpadX, phone.dpadY) }
+                } else if (elapsed >= MIN_PRESS_MS) {
+                    phone.port?.let { sendDpad(it, 0f, 0f) }
+                } else {
+                    scope.launch {
+                        delay(MIN_PRESS_MS - elapsed)
+                        if (phone.dpadX == 0f && phone.dpadY == 0f) phone.port?.let { sendDpad(it, 0f, 0f) }
+                    }
+                }
             }
             "a" -> {
                 // Shortcuts are only allowed to the first phone/player to avoid accidents.
@@ -259,6 +290,7 @@ class GameViewModelPhoneController(
         private const val INITIAL_QR_DURATION_MS = 30_000L
         private const val MENU_QR_DURATION_MS = 90_000L
         private const val MESSAGE_DURATION_MS = 3_000L
+        private const val MIN_PRESS_MS = 70L
 
         private val ALLOWED_KEYS =
             setOf(
