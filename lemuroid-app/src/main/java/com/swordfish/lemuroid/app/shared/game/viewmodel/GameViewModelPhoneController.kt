@@ -1,6 +1,7 @@
 package com.swordfish.lemuroid.app.shared.game.viewmodel
 
 import android.content.Context
+import android.view.InputDevice
 import android.view.KeyEvent
 import com.swordfish.lemuroid.app.shared.input.InputDeviceManager
 import com.swordfish.lemuroid.app.shared.phonecontroller.PhoneControllerFiles
@@ -53,7 +54,7 @@ class GameViewModelPhoneController(
 
     private val state = MutableStateFlow(UiState())
     private val phones = mutableListOf<PhoneState>()
-    private var gamePadsCount = 0
+    private var gamePadPorts = emptySet<Int>()
     private var qrJob: Job? = null
     private var messageJob: Job? = null
     private var started = false
@@ -74,11 +75,15 @@ class GameViewModelPhoneController(
         showQrCode(INITIAL_QR_DURATION_MS)
 
         scope.launch {
+            // Ports used by real gamepads (same order Lemuroid uses). The TV remote is often
+            // detected as a "keyboard" and would steal player 1, so it is ignored here.
             inputDeviceManager.getEnabledInputsObservable()
-                .map { it.size }
+                .map { devices ->
+                    devices.mapIndexedNotNull { index, device -> index.takeIf { isRealGamePad(device) } }.toSet()
+                }
                 .distinctUntilChanged()
                 .collect {
-                    gamePadsCount = it
+                    gamePadPorts = it
                     reassignPorts()
                 }
         }
@@ -202,8 +207,9 @@ class GameViewModelPhoneController(
     }
 
     private fun reassignPorts() {
+        val freePorts = (0 until MAX_PORTS).filter { it !in gamePadPorts }
         phones.forEachIndexed { index, phone ->
-            val newPort = (gamePadsCount + index).takeIf { it < MAX_PORTS }
+            val newPort = freePorts.getOrNull(index)
             if (newPort != phone.port) {
                 releaseAll(phone)
                 phone.port = newPort
@@ -216,6 +222,12 @@ class GameViewModelPhoneController(
             phone.client.send("p ${(phone.port ?: -1) + 1} ${if (isMain) 1 else 0}")
         }
         state.value = state.value.copy(connectedPlayers = phones.mapNotNull { it.port?.plus(1) })
+    }
+
+    private fun isRealGamePad(device: InputDevice): Boolean {
+        val sources = device.sources
+        return (sources and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD ||
+            (sources and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK
     }
 
     private fun releaseAll(phone: PhoneState) {
