@@ -40,13 +40,96 @@ class GameViewModelPhoneController(
         val message: String? = null,
     )
 
-    private class PhoneState(val client: PhoneControllerServer.Client) {
+    /**
+     * Delivers the states of one button (or the D-pad) to the game in order, keeping each state for
+     * at least [MIN_STATE_MS]. The core reads inputs once per frame: without this, a quick tap or a
+     * quick "release and press again" (sliding A -> B -> A) could happen between two frames and be lost.
+     */
+    private inner class InputChannel<T>(
+        private val idle: T,
+        private val apply: (port: Int, value: T) -> Unit,
+    ) {
         var port: Int? = null
-        val pressedKeys = mutableSetOf<Int>()
-        val pressTimes = mutableMapOf<Int, Long>()
-        var dpadX = 0f
-        var dpadY = 0f
-        var dpadTime = 0L
+        var desired: T = idle
+            private set
+        private var current: T = idle
+        private var lastChange = 0L
+        private val queue = ArrayDeque<T>()
+        private var job: Job? = null
+
+        fun push(value: T) {
+            desired = value
+            val last = queue.lastOrNull() ?: current
+            if (last == value) return
+            queue.addLast(value)
+            // Avoid unbounded lag when buttons are mashed: keep only the most recent changes.
+            while (queue.size > MAX_QUEUE) queue.removeFirst()
+            pump()
+        }
+
+        private fun pump() {
+            while (queue.isNotEmpty()) {
+                val next = queue.first()
+                if (next == current) {
+                    queue.removeFirst()
+                    continue
+                }
+                val elapsed = SystemClock.uptimeMillis() - lastChange
+                if (elapsed < MIN_STATE_MS) {
+                    if (job == null) {
+                        job =
+                            scope.launch {
+                                delay(MIN_STATE_MS - elapsed)
+                                job = null
+                                pump()
+                            }
+                    }
+                    return
+                }
+                queue.removeFirst()
+                current = next
+                lastChange = SystemClock.uptimeMillis()
+                port?.let { apply(it, next) }
+            }
+        }
+
+        /** Moves to another player port: release on the old one, restore the held state on the new one. */
+        fun movePort(newPort: Int?) {
+            job?.cancel()
+            job = null
+            queue.clear()
+            val oldPort = port
+            if (oldPort != null && current != idle) apply(oldPort, idle)
+            port = newPort
+            current = idle
+            lastChange = 0L
+            if (desired != idle) push(desired)
+        }
+
+        fun releaseAll() {
+            desired = idle
+            movePort(port)
+        }
+    }
+
+    private inner class PhoneState(val client: PhoneControllerServer.Client) {
+        var port: Int? = null
+        val keys =
+            ALLOWED_KEYS.associateWith { keyCode ->
+                InputChannel(false) { port, pressed -> sendKey(port, keyCode, pressed) }
+            }
+        val dpad = InputChannel(0f to 0f) { port, value -> sendDpad(port, value.first, value.second) }
+
+        fun channels() = keys.values + dpad
+
+        fun setPort(newPort: Int?) {
+            port = newPort
+            channels().forEach { it.movePort(newPort) }
+        }
+
+        fun releaseAll() {
+            channels().forEach { it.releaseAll() }
+        }
     }
 
     private val server =
@@ -154,7 +237,7 @@ class GameViewModelPhoneController(
     override fun onClientDisconnected(client: PhoneControllerServer.Client) {
         scope.launch {
             val phone = phones.firstOrNull { it.client == client } ?: return@launch
-            releaseAll(phone)
+            phone.releaseAll()
             phones.remove(phone)
             phone.port?.let { showMessage("Celular do Jogador ${it + 1} desconectou") }
             reassignPorts()
@@ -180,43 +263,13 @@ class GameViewModelPhoneController(
         when (parts.getOrNull(0)) {
             "k" -> {
                 val keyCode = parts.getOrNull(1)?.toIntOrNull() ?: return
-                if (keyCode !in ALLOWED_KEYS) return
-                val pressed = parts.getOrNull(2) == "1"
-                if (pressed) {
-                    phone.pressedKeys.add(keyCode)
-                    phone.pressTimes[keyCode] = SystemClock.uptimeMillis()
-                    phone.port?.let { sendKey(it, keyCode, true) }
-                } else {
-                    phone.pressedKeys.remove(keyCode)
-                    // A quick tap may press and release between two frames: the game would never
-                    // see it. Keep every press for a minimum time.
-                    val elapsed = SystemClock.uptimeMillis() - (phone.pressTimes[keyCode] ?: 0L)
-                    if (elapsed >= MIN_PRESS_MS) {
-                        phone.port?.let { sendKey(it, keyCode, false) }
-                    } else {
-                        scope.launch {
-                            delay(MIN_PRESS_MS - elapsed)
-                            if (keyCode !in phone.pressedKeys) phone.port?.let { sendKey(it, keyCode, false) }
-                        }
-                    }
-                }
+                val channel = phone.keys[keyCode] ?: return
+                channel.push(parts.getOrNull(2) == "1")
             }
             "d" -> {
-                phone.dpadX = parts.getOrNull(1)?.toFloatOrNull()?.coerceIn(-1f, 1f) ?: 0f
-                phone.dpadY = parts.getOrNull(2)?.toFloatOrNull()?.coerceIn(-1f, 1f) ?: 0f
-                val centered = phone.dpadX == 0f && phone.dpadY == 0f
-                val elapsed = SystemClock.uptimeMillis() - phone.dpadTime
-                if (!centered) {
-                    phone.dpadTime = SystemClock.uptimeMillis()
-                    phone.port?.let { sendDpad(it, phone.dpadX, phone.dpadY) }
-                } else if (elapsed >= MIN_PRESS_MS) {
-                    phone.port?.let { sendDpad(it, 0f, 0f) }
-                } else {
-                    scope.launch {
-                        delay(MIN_PRESS_MS - elapsed)
-                        if (phone.dpadX == 0f && phone.dpadY == 0f) phone.port?.let { sendDpad(it, 0f, 0f) }
-                    }
-                }
+                val x = parts.getOrNull(1)?.toFloatOrNull()?.coerceIn(-1f, 1f) ?: 0f
+                val y = parts.getOrNull(2)?.toFloatOrNull()?.coerceIn(-1f, 1f) ?: 0f
+                phone.dpad.push(x to y)
             }
             "a" -> {
                 // Shortcuts are only allowed to the first phone/player to avoid accidents.
@@ -241,14 +294,7 @@ class GameViewModelPhoneController(
         val freePorts = (0 until MAX_PORTS).filter { it !in gamePadPorts }
         phones.forEachIndexed { index, phone ->
             val newPort = freePorts.getOrNull(index)
-            if (newPort != phone.port) {
-                releaseAll(phone)
-                phone.port = newPort
-                newPort?.let { port ->
-                    phone.pressedKeys.forEach { sendKey(port, it, true) }
-                    sendDpad(port, phone.dpadX, phone.dpadY)
-                }
-            }
+            if (newPort != phone.port) phone.setPort(newPort)
             val isMain = index == 0
             phone.client.send("p ${(phone.port ?: -1) + 1} ${if (isMain) 1 else 0}")
         }
@@ -259,12 +305,6 @@ class GameViewModelPhoneController(
         val sources = device.sources
         return (sources and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD ||
             (sources and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK
-    }
-
-    private fun releaseAll(phone: PhoneState) {
-        val port = phone.port ?: return
-        phone.pressedKeys.forEach { sendKey(port, it, false) }
-        sendDpad(port, 0f, 0f)
     }
 
     private fun sendKey(
@@ -290,7 +330,8 @@ class GameViewModelPhoneController(
         private const val INITIAL_QR_DURATION_MS = 30_000L
         private const val MENU_QR_DURATION_MS = 90_000L
         private const val MESSAGE_DURATION_MS = 3_000L
-        private const val MIN_PRESS_MS = 70L
+        private const val MIN_STATE_MS = 50L
+        private const val MAX_QUEUE = 8
 
         private val ALLOWED_KEYS =
             setOf(
