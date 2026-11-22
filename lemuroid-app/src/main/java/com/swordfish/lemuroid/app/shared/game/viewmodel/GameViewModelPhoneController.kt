@@ -122,7 +122,7 @@ class GameViewModelPhoneController(
 
         fun channels() = keys.values + dpad
 
-        fun setPort(newPort: Int?) {
+        fun assignPort(newPort: Int?) {
             port = newPort
             channels().forEach { it.movePort(newPort) }
         }
@@ -294,7 +294,7 @@ class GameViewModelPhoneController(
         val freePorts = (0 until MAX_PORTS).filter { it !in gamePadPorts }
         phones.forEachIndexed { index, phone ->
             val newPort = freePorts.getOrNull(index)
-            if (newPort != phone.port) phone.setPort(newPort)
+            if (newPort != phone.port) phone.assignPort(newPort)
             val isMain = index == 0
             phone.client.send("p ${(phone.port ?: -1) + 1} ${if (isMain) 1 else 0}")
         }
