@@ -764,20 +764,19 @@ data class GameSystem(
                             exposedSettings =
                                 listOf(
                                     ExposedSetting(
-                                        "pcsx_rearmed_frameskip",
-                                        R.string.setting_pcsx_rearmed_frameskip,
-                                    ),
-                                ),
-                            exposedAdvancedSettings =
-                                listOf(
-                                    ExposedSetting(
                                         "pcsx_rearmed_drc",
                                         R.string.setting_pcsx_rearmed_drc,
+                                    ),
+                                    ExposedSetting(
+                                        "pcsx_rearmed_frameskip_type",
+                                        R.string.setting_pcsx_rearmed_frameskip_type,
                                     ),
                                 ),
                             defaultSettings =
                                 listOf(
+                                    // Mi Box and other TV boxes are slow: dynarec + automatic frameskip.
                                     CoreVariable("pcsx_rearmed_drc", "enabled"),
+                                    CoreVariable("pcsx_rearmed_frameskip_type", "auto"),
                                 ),
                             rumbleSupported = true,
                             supportsLibretroVFS = true,
