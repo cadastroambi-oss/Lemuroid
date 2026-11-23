@@ -21,6 +21,8 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import java.util.zip.ZipFile
+import java.nio.charset.Charset
+import android.os.Build
 
 /**
  * Phone hub running in the main (menu) process. A phone that scans its QR code can:
@@ -185,12 +187,13 @@ object PhoneHub : PhoneControllerServer.Listener {
             method == "POST" && path == "/upload" -> upload(query["name"], body, contentLength)
             method == "POST" && path == "/delete" -> delete(query["name"])
             method == "POST" && path == "/rescan" -> {
-                romsDirectory().listFiles()
-                    ?.filter { it.extension.equals("zip", ignoreCase = true) }
-                    ?.forEach { prepareDiscGames(it) }
-                prepareDiscGames(File(romsDirectory(), ".none"))
+                val messages =
+                    romsDirectory().listFiles()
+                        ?.filter { it.extension.equals("zip", ignoreCase = true) }
+                        ?.mapNotNull { prepareDiscGames(it) }
+                        .orEmpty() + listOfNotNull(prepareDiscGames(File(romsDirectory(), ".none")))
                 LibraryIndexScheduler.scheduleLibrarySync(appContext)
-                HttpResponse.json("{\"ok\":true}")
+                HttpResponse.json(JSONObject().put("ok", true).put("message", messages.joinToString("\n")).toString())
             }
             else -> null
         }
@@ -242,7 +245,7 @@ object PhoneHub : PhoneControllerServer.Listener {
             val result = prepareDiscGames(target)
             setMessage(result ?: "Recebido: $fileName")
             LibraryIndexScheduler.scheduleLibrarySync(appContext)
-            HttpResponse.json("{\"ok\":true}")
+            HttpResponse.json(JSONObject().put("ok", true).put("message", result ?: "").toString())
         } catch (e: Exception) {
             temp.delete()
             Timber.e(e, "Upload failed")
@@ -258,12 +261,8 @@ object PhoneHub : PhoneControllerServer.Listener {
      */
     private fun prepareDiscGames(file: File): String? {
         var message: String? = null
-        if (file.extension.equals("zip", ignoreCase = true) && zipHasDiscFiles(file)) {
-            val extracted = extractZip(file)
-            if (extracted.isNotEmpty()) {
-                file.delete()
-                message = "Descompactado: ${file.name}"
-            }
+        if (file.extension.equals("zip", ignoreCase = true) && file.exists()) {
+            message = handleZip(file)
         }
 
         romsDirectory().listFiles()
@@ -281,7 +280,7 @@ object PhoneHub : PhoneControllerServer.Listener {
                     File(romsDirectory(), "${bin.nameWithoutExtension}.cue").writeText(
                         "FILE \"${bin.name}\" BINARY\r\n  TRACK 01 MODE2/2352\r\n    INDEX 01 00:00:00\r\n",
                     )
-                    message = "Jogo de PlayStation pronto: ${bin.nameWithoutExtension}"
+                    message = (message?.let { "$it\n" } ?: "") + "Jogo de PlayStation pronto: ${bin.nameWithoutExtension}"
                 }
             }
 
@@ -289,18 +288,47 @@ object PhoneHub : PhoneControllerServer.Listener {
         return message
     }
 
-    private fun zipHasDiscFiles(file: File): Boolean {
-        return runCatching {
-            ZipFile(file).use { zip ->
-                zip.entries().asSequence().any { it.name.substringAfterLast('.').lowercase() in DISC_EXTENSIONS }
+    /** Opens a zip; some zips (made on Windows) have names that are not UTF-8. */
+    private fun openZip(file: File): ZipFile {
+        return try {
+            ZipFile(file)
+        } catch (e: Exception) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                ZipFile(file, Charset.forName("IBM437"))
+            } else {
+                throw e
             }
-        }.getOrDefault(false)
+        }
     }
 
-    private fun extractZip(file: File): List<File> {
-        val result = mutableListOf<File>()
-        runCatching {
-            ZipFile(file).use { zip ->
+    /** Extracts PlayStation discs from a zip. Returns a message explaining what happened, or null. */
+    private fun handleZip(file: File): String? {
+        val names =
+            try {
+                openZip(file).use { zip -> zip.entries().asSequence().filter { !it.isDirectory }.map { it.name }.toList() }
+            } catch (e: Exception) {
+                Timber.e(e, "Unable to open ${file.name}")
+                return "Não consegui abrir ${file.name} (${e.message}). " +
+                    "Descompacte no celular e mande os arquivos de dentro."
+            }
+
+        val extensions = names.map { it.substringAfterLast('.', "").lowercase() }
+        if (extensions.none { it in DISC_EXTENSIONS }) {
+            val unsupported = extensions.filter { it in UNSUPPORTED_EXTENSIONS }.distinct()
+            return when {
+                unsupported.isNotEmpty() ->
+                    "Dentro de ${file.name} tem arquivo .${unsupported.joinToString(", .")}, que a TV não abre. " +
+                        "Descompacte no celular e mande o .bin/.cue ou .chd."
+                file.length() > MIN_DISC_SIZE ->
+                    "${file.name} não tem jogo de PlayStation dentro. Arquivos: " +
+                        names.take(5).joinToString { it.substringAfterLast('/') }
+                else -> null // A normal zipped cartridge game (SNES, Mega Drive...): Lemuroid reads it directly.
+            }
+        }
+
+        val extracted = mutableListOf<File>()
+        return try {
+            openZip(file).use { zip ->
                 zip.entries().asSequence()
                     .filter { !it.isDirectory }
                     .forEach { entry ->
@@ -309,11 +337,17 @@ object PhoneHub : PhoneControllerServer.Listener {
                         zip.getInputStream(entry).use { input ->
                             target.outputStream().use { output -> input.copyTo(output, 256 * 1024) }
                         }
-                        result.add(target)
+                        extracted.add(target)
                     }
             }
-        }.onFailure { Timber.e(it, "Unable to extract ${file.name}") }
-        return result
+            file.delete()
+            "Descompactado: ${file.name}"
+        } catch (e: Exception) {
+            Timber.e(e, "Unable to extract ${file.name}")
+            extracted.forEach { it.delete() }
+            "Não consegui descompactar ${file.name} (${e.message}). " +
+                "Descompacte no celular e mande os arquivos de dentro."
+        }
     }
 
     private fun delete(name: String?): HttpResponse {
@@ -326,6 +360,7 @@ object PhoneHub : PhoneControllerServer.Listener {
 
     private const val MIN_DISC_SIZE = 50L * 1024 * 1024
     private val DISC_EXTENSIONS = setOf("bin", "cue", "iso", "img", "chd", "pbp", "m3u", "ccd", "sub")
+    private val UNSUPPORTED_EXTENSIONS = setOf("7z", "rar", "ecm", "ape", "zip")
 
     private const val JOYSTICK_ASSET = "phone_controller.html"
     private const val UPLOAD_ASSET = "phone_hub.html"

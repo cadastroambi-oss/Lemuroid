@@ -216,7 +216,10 @@
     xhr.onload = function () {
       if (xhr.status === 200) {
         job.row.classList.add('done');
-        job.row.querySelector('.state').textContent = 'Enviado ✓';
+        var extra = '';
+        try { extra = JSON.parse(xhr.responseText).message || ''; } catch (e) {}
+        job.row.querySelector('.state').textContent = 'Enviado ✓' + (extra ? ' — ' + extra : '');
+        if (/Não consegui|não tem jogo|que a TV não abre/.test(extra)) job.row.classList.add('fail');
         job.row.querySelector('.progress div').style.width = '100%';
       } else {
         job.row.classList.add('fail');
@@ -234,7 +237,13 @@
   }
 
   document.getElementById('rescan').onclick = function () {
-    fetch('/rescan', { method: 'POST' }).then(function () { alert('A TV vai procurar os jogos de novo.'); });
+    var btn = document.getElementById('rescan');
+    btn.textContent = 'Procurando… (pode levar 1-2 min)';
+    fetch('/rescan', { method: 'POST' }).then(function (r) { return r.json(); }).then(function (data) {
+      btn.textContent = 'Procurar jogos de novo na TV';
+      alert(data.message ? data.message : 'Pronto. A TV vai procurar os jogos de novo.');
+      loadFiles();
+    }).catch(function () { btn.textContent = 'Procurar jogos de novo na TV'; });
   };
 })();
 </script>
