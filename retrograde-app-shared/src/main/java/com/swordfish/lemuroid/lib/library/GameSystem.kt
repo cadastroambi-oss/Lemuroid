@@ -777,7 +777,7 @@ data class GameSystem(
                                 ),
                             defaultSettings =
                                 listOf(
-                                    CoreVariable("pcsx_rearmed_drc", "disabled"),
+                                    CoreVariable("pcsx_rearmed_drc", "enabled"),
                                 ),
                             rumbleSupported = true,
                             supportsLibretroVFS = true,
