@@ -326,8 +326,6 @@ class GameViewModelPhoneController(
                 phone.dpad.push(x to y)
             }
             "a" -> {
-                // Shortcuts are only allowed to the first phone/player to avoid accidents.
-                if (phone != phones.firstOrNull()) return
                 when (parts.getOrNull(1)) {
                     // Saved in slot 1 of the game menu: it stays there even after closing the game.
                     "save" ->
@@ -352,8 +350,8 @@ class GameViewModelPhoneController(
         phones.forEachIndexed { index, phone ->
             val newPort = freePorts.getOrNull(index)
             if (newPort != phone.port) phone.assignPort(newPort)
-            val isMain = index == 0
-            phone.client.send("p ${(phone.port ?: -1) + 1} ${if (isMain) 1 else 0}")
+            // Every phone gets the shortcuts (Salvar / Carregar / Turbo / Menu).
+            phone.client.send("p ${(phone.port ?: -1) + 1} 1")
         }
         state.value = state.value.copy(connectedPlayers = phones.mapNotNull { it.port?.plus(1) })
     }
