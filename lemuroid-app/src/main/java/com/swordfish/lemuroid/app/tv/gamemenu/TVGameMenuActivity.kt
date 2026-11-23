@@ -1,5 +1,8 @@
 package com.swordfish.lemuroid.app.tv.gamemenu
 
+import android.view.KeyEvent
+import android.content.Intent
+import android.app.Activity
 import android.os.Bundle
 import androidx.fragment.app.Fragment
 import com.swordfish.lemuroid.app.shared.GameMenuContract
@@ -86,6 +89,30 @@ class TVGameMenuActivity : TVBaseSettingsActivity() {
             supportFragmentManager.beginTransaction().replace(android.R.id.content, fragment)
                 .commit()
         }
+    }
+
+    /**
+     * "Voltar" on the main page of the menu quits the game (the game is auto-saved as usual).
+     * Inside a sub-page (Salvar, Carregar, Configurações…) it just goes back to the main page.
+     */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode == KeyEvent.KEYCODE_BACK && isOnMainPage()) {
+            // Only react to a full press made inside the menu (not the release of the press that opened it).
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) backPressStarted = true
+            if (event.action == KeyEvent.ACTION_UP && backPressStarted && !event.isCanceled) {
+                setResult(Activity.RESULT_OK, Intent().putExtra(GameMenuContract.RESULT_QUIT, true))
+                finish()
+            }
+            return true
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
+    private var backPressStarted = false
+
+    private fun isOnMainPage(): Boolean {
+        val wrapper = supportFragmentManager.findFragmentById(android.R.id.content) ?: return true
+        return wrapper.childFragmentManager.backStackEntryCount == 0
     }
 
     override fun finish() {

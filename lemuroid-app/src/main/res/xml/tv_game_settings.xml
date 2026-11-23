@@ -22,6 +22,7 @@
     <Preference
         android:key="pref_game_quit"
         android:title="@string/game_menu_quit"
+        android:summary="Ou aperte Voltar de novo. O jogo fica salvo de onde parou."
         app:icon="@drawable/ic_menu_quit"/>
 
     <Preference

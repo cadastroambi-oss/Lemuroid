@@ -305,11 +305,14 @@ class GameViewModelInput(
                 val port = ports(device)
                 val bindKeyCode = bindings(device)[InputKey(keyCode)]?.keyCode ?: keyCode
 
+                // Home/"O"/extra buttons of the gamepad (they have no use in SNES/PS1 games) open the
+                // game menu, for any player.
+                if (port != null && bindKeyCode in MENU_KEYS) {
+                    if (action == KeyEvent.ACTION_DOWN) sideEffects.showMenu(tilt, this)
+                    return@safeCollect
+                }
+
                 if (port == 0) {
-                    if (bindKeyCode == KeyEvent.KEYCODE_BUTTON_MODE && action == KeyEvent.ACTION_DOWN) {
-                        sideEffects.showMenu(tilt, this)
-                        return@safeCollect
-                    }
 
                     if (action == KeyEvent.ACTION_DOWN) {
                         pressedKeys.add(keyCode)
@@ -394,5 +397,31 @@ class GameViewModelInput(
         } catch (e: Exception) {
             Timber.e(e)
         }
+    }
+
+    companion object {
+        private val MENU_KEYS =
+            setOf(
+                KeyEvent.KEYCODE_BUTTON_MODE,
+                KeyEvent.KEYCODE_MENU,
+                KeyEvent.KEYCODE_BUTTON_C,
+                KeyEvent.KEYCODE_BUTTON_Z,
+                KeyEvent.KEYCODE_BUTTON_1,
+                KeyEvent.KEYCODE_BUTTON_2,
+                KeyEvent.KEYCODE_BUTTON_3,
+                KeyEvent.KEYCODE_BUTTON_4,
+                KeyEvent.KEYCODE_BUTTON_5,
+                KeyEvent.KEYCODE_BUTTON_6,
+                KeyEvent.KEYCODE_BUTTON_7,
+                KeyEvent.KEYCODE_BUTTON_8,
+                KeyEvent.KEYCODE_BUTTON_9,
+                KeyEvent.KEYCODE_BUTTON_10,
+                KeyEvent.KEYCODE_BUTTON_11,
+                KeyEvent.KEYCODE_BUTTON_12,
+                KeyEvent.KEYCODE_BUTTON_13,
+                KeyEvent.KEYCODE_BUTTON_14,
+                KeyEvent.KEYCODE_BUTTON_15,
+                KeyEvent.KEYCODE_BUTTON_16,
+            )
     }
 }

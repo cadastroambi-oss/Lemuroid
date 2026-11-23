@@ -316,6 +316,10 @@ class BaseGameScreenViewModel(
         }
     }
 
+    fun showGameMenu() {
+        sideEffects.showMenu(tilt, inputs)
+    }
+
     fun startPhoneController() {
         phoneController.start()
     }

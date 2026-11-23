@@ -1,5 +1,6 @@
 package com.swordfish.lemuroid.app.shared.game
 
+import com.swordfish.lemuroid.app.tv.shared.TVHelper
 import android.app.Activity
 import android.content.Intent
 import android.content.SharedPreferences
@@ -141,7 +142,13 @@ abstract class BaseGameActivity : ImmersiveActivity() {
             this,
             object : OnBackPressedCallback(true) {
                 override fun handleOnBackPressed() {
-                    baseGameScreenViewModel.requestFinish()
+                    // On TV the remote has no menu button: "Voltar" opens the game menu
+                    // (save / load). Pressing "Voltar" again inside the menu quits the game.
+                    if (TVHelper.isTV(this@BaseGameActivity)) {
+                        baseGameScreenViewModel.showGameMenu()
+                    } else {
+                        baseGameScreenViewModel.requestFinish()
+                    }
                 }
             },
         )
