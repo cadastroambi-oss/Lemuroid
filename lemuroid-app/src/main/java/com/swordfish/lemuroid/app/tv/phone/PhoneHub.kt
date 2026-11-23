@@ -20,6 +20,7 @@ import java.net.Socket
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
+import java.util.zip.ZipFile
 
 /**
  * Phone hub running in the main (menu) process. A phone that scans its QR code can:
@@ -72,6 +73,16 @@ object PhoneHub : PhoneControllerServer.Listener {
         refreshUrl()
 
         poller.scheduleWithFixedDelay({ pollGame() }, 1, 1, TimeUnit.SECONDS)
+
+        // Games sent before this version may still need their .cue / extraction.
+        poller.execute {
+            runCatching {
+                romsDirectory().listFiles()
+                    ?.filter { it.extension.equals("zip", ignoreCase = true) }
+                    ?.forEach { prepareDiscGames(it) }
+                prepareDiscGames(File(romsDirectory(), ".none"))
+            }
+        }
     }
 
     fun refreshUrl() {
@@ -174,6 +185,10 @@ object PhoneHub : PhoneControllerServer.Listener {
             method == "POST" && path == "/upload" -> upload(query["name"], body, contentLength)
             method == "POST" && path == "/delete" -> delete(query["name"])
             method == "POST" && path == "/rescan" -> {
+                romsDirectory().listFiles()
+                    ?.filter { it.extension.equals("zip", ignoreCase = true) }
+                    ?.forEach { prepareDiscGames(it) }
+                prepareDiscGames(File(romsDirectory(), ".none"))
                 LibraryIndexScheduler.scheduleLibrarySync(appContext)
                 HttpResponse.json("{\"ok\":true}")
             }
@@ -223,7 +238,9 @@ object PhoneHub : PhoneControllerServer.Listener {
             }
             target.delete()
             temp.renameTo(target)
-            setMessage("Recebido: $fileName")
+            setMessage("Preparando: $fileName")
+            val result = prepareDiscGames(target)
+            setMessage(result ?: "Recebido: $fileName")
             LibraryIndexScheduler.scheduleLibrarySync(appContext)
             HttpResponse.json("{\"ok\":true}")
         } catch (e: Exception) {
@@ -233,6 +250,72 @@ object PhoneHub : PhoneControllerServer.Listener {
         }
     }
 
+    /**
+     * PlayStation games usually come as "game.bin" (without the .cue Lemuroid needs) or zipped.
+     * - a .zip with disc files inside is extracted;
+     * - a big .bin without a .cue gets a simple single-track .cue.
+     * Returns a message for the TV, or null when nothing was done.
+     */
+    private fun prepareDiscGames(file: File): String? {
+        var message: String? = null
+        if (file.extension.equals("zip", ignoreCase = true) && zipHasDiscFiles(file)) {
+            val extracted = extractZip(file)
+            if (extracted.isNotEmpty()) {
+                file.delete()
+                message = "Descompactado: ${file.name}"
+            }
+        }
+
+        romsDirectory().listFiles()
+            ?.filter { it.isFile && it.extension.equals("bin", ignoreCase = true) && it.length() > MIN_DISC_SIZE }
+            ?.forEach { bin ->
+                val hasCue =
+                    romsDirectory().listFiles()?.any { other ->
+                        other.extension.equals("cue", ignoreCase = true) &&
+                            (
+                                other.nameWithoutExtension.equals(bin.nameWithoutExtension, ignoreCase = true) ||
+                                    runCatching { other.readText().contains(bin.name, ignoreCase = true) }.getOrDefault(false)
+                            )
+                    } == true
+                if (!hasCue) {
+                    File(romsDirectory(), "${bin.nameWithoutExtension}.cue").writeText(
+                        "FILE \"${bin.name}\" BINARY\r\n  TRACK 01 MODE2/2352\r\n    INDEX 01 00:00:00\r\n",
+                    )
+                    message = "Jogo de PlayStation pronto: ${bin.nameWithoutExtension}"
+                }
+            }
+
+        if (message != null) LibraryIndexScheduler.scheduleLibrarySync(appContext)
+        return message
+    }
+
+    private fun zipHasDiscFiles(file: File): Boolean {
+        return runCatching {
+            ZipFile(file).use { zip ->
+                zip.entries().asSequence().any { it.name.substringAfterLast('.').lowercase() in DISC_EXTENSIONS }
+            }
+        }.getOrDefault(false)
+    }
+
+    private fun extractZip(file: File): List<File> {
+        val result = mutableListOf<File>()
+        runCatching {
+            ZipFile(file).use { zip ->
+                zip.entries().asSequence()
+                    .filter { !it.isDirectory }
+                    .forEach { entry ->
+                        val name = safeName(entry.name.substringAfterLast('/')) ?: return@forEach
+                        val target = File(romsDirectory(), name)
+                        zip.getInputStream(entry).use { input ->
+                            target.outputStream().use { output -> input.copyTo(output, 256 * 1024) }
+                        }
+                        result.add(target)
+                    }
+            }
+        }.onFailure { Timber.e(it, "Unable to extract ${file.name}") }
+        return result
+    }
+
     private fun delete(name: String?): HttpResponse {
         val fileName = safeName(name) ?: return HttpResponse.error(400, "Nome de arquivo inválido")
         val target = File(romsDirectory(), fileName)
@@ -240,6 +323,9 @@ object PhoneHub : PhoneControllerServer.Listener {
         LibraryIndexScheduler.scheduleLibrarySync(appContext)
         return HttpResponse.json("{\"ok\":true}")
     }
+
+    private const val MIN_DISC_SIZE = 50L * 1024 * 1024
+    private val DISC_EXTENSIONS = setOf("bin", "cue", "iso", "img", "chd", "pbp", "m3u", "ccd", "sub")
 
     private const val JOYSTICK_ASSET = "phone_controller.html"
     private const val UPLOAD_ASSET = "phone_hub.html"
