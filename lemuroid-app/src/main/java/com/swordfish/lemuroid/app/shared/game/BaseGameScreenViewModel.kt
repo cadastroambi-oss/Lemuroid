@@ -138,6 +138,8 @@ class BaseGameScreenViewModel(
             inputs,
             sideEffects,
             viewModelScope,
+            saveSlot = { saveSlot(it) },
+            loadSlot = { loadSlot(it) },
         )
     private val saves =
         GameViewModelSaves(

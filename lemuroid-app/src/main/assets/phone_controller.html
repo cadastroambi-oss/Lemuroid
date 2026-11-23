@@ -75,7 +75,7 @@
   </div>
 
   <div id="center">
-    <div id="player"><span class="dot"></span><span id="playerText">Conectando…</span></div>
+    <div id="player"><span class="dot"></span><span id="playerText">Conectando…</span> <span id="ping" style="font-size:12px;margin-left:6px"></span></div>
     <div class="sysbtns">
       <div class="sys btn" data-key="109">SELECT</div>
       <div class="sys btn" data-key="108">START</div>
@@ -122,6 +122,11 @@
     ws.onopen = function () { connected = true; failures = 0; overlay.classList.add('hidden'); };
     ws.onmessage = function (ev) {
       var p = String(ev.data).split(' ');
+      if (p[0] === 't') {
+        var sent = parseInt(p[1], 10);
+        if (!isNaN(sent)) showPing(Math.max(1, Math.round(performance.now() - sent)));
+        return;
+      }
       if (p[0] === 'm') {
         // Connected to the TV menus (no game open yet): the joystick moves through the menus.
         menuMode = true;
@@ -174,7 +179,16 @@
     retryTimer = setTimeout(function () { retryTimer = null; connect(); }, 2000);
   }
 
-  setInterval(function () { send('h'); }, 1000);
+  // Frequent small pings keep the phone and TV Wi-Fi awake (power saving adds delay to every
+  // press) and let us show the current delay next to the player number.
+  var pingText = '';
+  var basePlayerText = '';
+  setInterval(function () { send('t ' + Math.round(performance.now())); }, 100);
+  function showPing(rtt) {
+    var label = document.getElementById('ping');
+    label.textContent = rtt + ' ms';
+    label.style.color = rtt < 40 ? '#8ce99a' : (rtt < 90 ? '#ffd43b' : '#ff8787');
+  }
 
   // While waiting in the TV menus, also look for the game directly: the game opens its own
   // server on one of the next ports. As soon as one answers, jump to it.

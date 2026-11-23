@@ -1,6 +1,8 @@
 package com.swordfish.lemuroid.app.shared.game.viewmodel
 
 import android.content.Context
+import android.net.wifi.WifiManager
+import android.os.Build
 import android.os.SystemClock
 import android.view.InputDevice
 import android.view.KeyEvent
@@ -17,6 +19,9 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import timber.log.Timber
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 
 /**
  * Lets phones on the same Wi-Fi act as gamepads. The TV shows a QR code with the address of a small
@@ -31,6 +36,8 @@ class GameViewModelPhoneController(
     private val inputs: GameViewModelInput,
     private val sideEffects: GameViewModelSideEffects,
     private val scope: CoroutineScope,
+    private val saveSlot: suspend (Int) -> Unit,
+    private val loadSlot: suspend (Int) -> Unit,
 ) : PhoneControllerServer.Listener {
     data class UiState(
         val enabled: Boolean = false,
@@ -55,7 +62,7 @@ class GameViewModelPhoneController(
         private var current: T = idle
         private var lastChange = 0L
         private val queue = ArrayDeque<T>()
-        private var job: Job? = null
+        private var job: ScheduledFuture<*>? = null
 
         fun push(value: T) {
             desired = value
@@ -78,11 +85,18 @@ class GameViewModelPhoneController(
                 if (elapsed < MIN_STATE_MS) {
                     if (job == null) {
                         job =
-                            scope.launch {
-                                delay(MIN_STATE_MS - elapsed)
-                                job = null
-                                pump()
-                            }
+                            runCatching {
+                                timer.schedule(
+                                    Runnable {
+                                    synchronized(lock) {
+                                        job = null
+                                        pump()
+                                    }
+                                },
+                                    MIN_STATE_MS - elapsed,
+                                    TimeUnit.MILLISECONDS,
+                                )
+                            }.getOrNull()
                     }
                     return
                 }
@@ -95,7 +109,7 @@ class GameViewModelPhoneController(
 
         /** Moves to another player port: release on the old one, restore the held state on the new one. */
         fun movePort(newPort: Int?) {
-            job?.cancel()
+            job?.cancel(false)
             job = null
             queue.clear()
             val oldPort = port
@@ -138,6 +152,12 @@ class GameViewModelPhoneController(
             listener = this,
         )
 
+    // Inputs are handled directly on the network threads (no hop through the busy main thread):
+    // the lock keeps the phones' state consistent.
+    private val lock = Any()
+    private val timer = Executors.newSingleThreadScheduledExecutor()
+    private var wifiLock: WifiManager.WifiLock? = null
+
     private val state = MutableStateFlow(UiState())
     private val phones = mutableListOf<PhoneState>()
     private var gamePadPorts = emptySet<Int>()
@@ -156,6 +176,7 @@ class GameViewModelPhoneController(
             return
         }
 
+        acquireWifiLock()
         PhoneControllerFiles.writeGamePort(appContext, server.port)
         state.value = state.value.copy(enabled = true, url = computeUrl())
         showQrCode(INITIAL_QR_DURATION_MS)
@@ -169,8 +190,10 @@ class GameViewModelPhoneController(
                 }
                 .distinctUntilChanged()
                 .collect {
-                    gamePadPorts = it
-                    reassignPorts()
+                    synchronized(lock) {
+                        gamePadPorts = it
+                        reassignPorts()
+                    }
                 }
         }
     }
@@ -178,7 +201,29 @@ class GameViewModelPhoneController(
     fun stop() {
         PhoneControllerFiles.clearGamePort(appContext)
         server.stop()
+        timer.shutdownNow()
+        runCatching { wifiLock?.takeIf { it.isHeld }?.release() }
+        wifiLock = null
         started = false
+    }
+
+    /** Keeps the TV Wi-Fi out of power saving while playing: it adds tens of ms to every button press. */
+    private fun acquireWifiLock() {
+        runCatching {
+            val wifiManager = appContext.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            val mode =
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+                } else {
+                    @Suppress("DEPRECATION")
+                    WifiManager.WIFI_MODE_FULL_HIGH_PERF
+                }
+            wifiLock =
+                wifiManager.createWifiLock(mode, "lemuroid:phone-controller").apply {
+                    setReferenceCounted(false)
+                    acquire()
+                }
+        }.onFailure { Timber.w(it, "Unable to acquire Wi-Fi lock") }
     }
 
     fun showQrCode(durationMs: Long = MENU_QR_DURATION_MS) {
@@ -217,14 +262,16 @@ class GameViewModelPhoneController(
         return appContext.assets.open(PAGE_ASSET).use { it.readBytes() }
     }
 
-    // Server callbacks arrive on background threads: everything is moved to the scope (main thread),
-    // which also keeps the events in order.
+    // Server callbacks arrive on network threads.
 
     override fun onClientConnected(client: PhoneControllerServer.Client) {
+        val player =
+            synchronized(lock) {
+                phones.add(PhoneState(client))
+                reassignPorts()
+                phones.firstOrNull { it.client == client }?.port?.plus(1)
+            }
         scope.launch {
-            phones.add(PhoneState(client))
-            reassignPorts()
-            val player = phones.firstOrNull { it.client == client }?.port?.plus(1)
             if (player != null) {
                 showMessage("Celular conectado: Jogador $player")
                 hideQrCode()
@@ -235,13 +282,15 @@ class GameViewModelPhoneController(
     }
 
     override fun onClientDisconnected(client: PhoneControllerServer.Client) {
-        scope.launch {
-            val phone = phones.firstOrNull { it.client == client } ?: return@launch
-            phone.releaseAll()
-            phones.remove(phone)
-            phone.port?.let { showMessage("Celular do Jogador ${it + 1} desconectou") }
-            reassignPorts()
-        }
+        val port =
+            synchronized(lock) {
+                val phone = phones.firstOrNull { it.client == client } ?: return
+                phone.releaseAll()
+                phones.remove(phone)
+                reassignPorts()
+                phone.port
+            }
+        port?.let { scope.launch { showMessage("Celular do Jogador ${it + 1} desconectou") } }
     }
 
     override fun onClientMessage(
@@ -249,8 +298,13 @@ class GameViewModelPhoneController(
         message: String,
     ) {
         if (message == "h") return // heartbeat
-        scope.launch {
-            val phone = phones.firstOrNull { it.client == client } ?: return@launch
+        if (message.startsWith("t ")) {
+            // Ping: echo it back right away so the phone can show the delay.
+            client.send(message)
+            return
+        }
+        synchronized(lock) {
+            val phone = phones.firstOrNull { it.client == client } ?: return
             handleMessage(phone, message)
         }
     }
@@ -275,16 +329,19 @@ class GameViewModelPhoneController(
                 // Shortcuts are only allowed to the first phone/player to avoid accidents.
                 if (phone != phones.firstOrNull()) return
                 when (parts.getOrNull(1)) {
-                    "save" -> {
-                        sideEffects.saveQuickSave()
-                        showMessage("Estado salvo")
-                    }
-                    "load" -> {
-                        sideEffects.loadQuickSave()
-                        showMessage("Estado carregado")
-                    }
-                    "ff" -> sideEffects.toggleFastForward()
-                    "menu" -> sideEffects.showMenu(tilt, inputs)
+                    // Saved in slot 1 of the game menu: it stays there even after closing the game.
+                    "save" ->
+                        scope.launch {
+                            saveSlot(PHONE_SAVE_SLOT)
+                            showMessage("Jogo salvo no espaço 1")
+                        }
+                    "load" ->
+                        scope.launch {
+                            loadSlot(PHONE_SAVE_SLOT)
+                            showMessage("Voltou para o espaço 1")
+                        }
+                    "ff" -> scope.launch { sideEffects.toggleFastForward() }
+                    "menu" -> scope.launch { sideEffects.showMenu(tilt, inputs) }
                 }
             }
         }
@@ -332,6 +389,7 @@ class GameViewModelPhoneController(
         private const val MESSAGE_DURATION_MS = 3_000L
         private const val MIN_STATE_MS = 50L
         private const val MAX_QUEUE = 8
+        private const val PHONE_SAVE_SLOT = 0
 
         private val ALLOWED_KEYS =
             setOf(
